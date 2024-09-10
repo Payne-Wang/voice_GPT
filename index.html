@@ -47,15 +47,35 @@
     <div class="container mx-auto px-4 py-8 flex flex-col h-screen max-w-4xl">
         <div class="bg-white shadow-md rounded-lg p-4 mb-4">
             <div class="flex flex-col gap-2">
-                <input id="baseUrlInput" type="text" placeholder="API Base URL" class="border border-gray-300 rounded p-2" />
-                <input id="apiKeyInput" type="password" placeholder="输入API Key" class="border border-gray-300 rounded p-2" />
-                <div class="flex flex-col sm:flex-row gap-2 items-center">
-                    <select id="modelSelect" class="border border-gray-300 rounded p-2 w-full sm:w-auto">
+                <div class="flex flex-col sm:flex-row gap-2">
+                    <input id="baseUrlInput" type="text" placeholder="API Base URL (默认: https://gptproxy.openai520.top)" class="border border-gray-300 rounded p-2 flex-grow" />
+                    <input id="apiKeyInput" type="password" placeholder="输入API Key" class="border border-gray-300 rounded p-2 flex-grow" />
+                </div>
+                <div class="flex flex-col sm:flex-row gap-2">
+                    <select id="modelSelect" class="border border-gray-300 rounded p-2 flex-grow">
                         <!-- 模型选项将在这里动态添加 -->
                     </select>
-                    <div class="flex items-center w-full sm:w-auto">
-                        <input id="ttsSpeed" type="range" min="0.5" max="2" step="0.1" value="1" class="w-full sm:w-32" />
-                        <span id="ttsSpeedValue" class="ml-2 whitespace-nowrap">TTS速度: 1</span>
+                    <select id="ttsService" class="border border-gray-300 rounded p-2 flex-grow">
+                        <option value="openai">OpenAI TTS</option>
+                        <option value="edge">Edge TTS</option>
+                    </select>
+                </div>
+                <div id="openaiTtsOptions" class="flex flex-col sm:flex-row gap-2">
+                    <select id="openaiVoiceSelect" class="border border-gray-300 rounded p-2 flex-grow">
+                        <!-- OpenAI 音色选项将在这里动态添加 -->
+                    </select>
+                    <div class="flex items-center flex-grow">
+                        <input id="openaiTtsSpeed" type="range" min="0.5" max="2" step="0.1" value="1" class="w-full" />
+                        <span id="openaiTtsSpeedValue" class="ml-2 whitespace-nowrap">TTS速度: 1</span>
+                    </div>
+                </div>
+                <div id="edgeTtsOptions" class="flex flex-col gap-2" style="display: none;">
+                    <select id="edgeVoiceSelect" class="border border-gray-300 rounded p-2">
+                        <!-- Edge 音色选项将在这里动态添加 -->
+                    </select>
+                    <div class="flex items-center">
+                        <input id="edgeTtsSpeed" type="range" min="0.5" max="2" step="0.1" value="1" class="w-full" />
+                        <span id="edgeTtsSpeedValue" class="ml-2 whitespace-nowrap">TTS速度: 1</span>
                     </div>
                 </div>
             </div>
@@ -81,16 +101,23 @@
     </div>
 
     <script>
-        let API_BASE_URL = '';
+        let API_BASE_URL = 'https://gptproxy.openai520.top';
         let currentAudio = null;
         let currentAudioSource = null;
         let currentSpeakerButton = null;
-        let latestSpeakerButton = null;
+        let isPlayingAudio = false;
         const baseUrlInput = document.getElementById('baseUrlInput');
         const apiKeyInput = document.getElementById('apiKeyInput');
         const modelSelect = document.getElementById('modelSelect');
-        const ttsSpeed = document.getElementById('ttsSpeed');
-        const ttsSpeedValue = document.getElementById('ttsSpeedValue');
+        const ttsService = document.getElementById('ttsService');
+        const openaiTtsOptions = document.getElementById('openaiTtsOptions');
+        const edgeTtsOptions = document.getElementById('edgeTtsOptions');
+        const openaiVoiceSelect = document.getElementById('openaiVoiceSelect');
+        const edgeVoiceSelect = document.getElementById('edgeVoiceSelect');
+        const openaiTtsSpeed = document.getElementById('openaiTtsSpeed');
+        const edgeTtsSpeed = document.getElementById('edgeTtsSpeed');
+        const openaiTtsSpeedValue = document.getElementById('openaiTtsSpeedValue');
+        const edgeTtsSpeedValue = document.getElementById('edgeTtsSpeedValue');
         const chatContainer = document.getElementById('chatContainer');
         const userInput = document.getElementById('userInput');
         const sendButton = document.getElementById('sendButton');
@@ -102,14 +129,41 @@
         let audioChunks = [];
         let conversationHistory = [];
 
+        const allowedModels = [
+            'gpt-4o-mini',
+            'gpt-3.5-turbo-16k',
+            'claude-3-haiku-20240307',
+            'gemini-1.5-flash-001',
+            'claude-3-5-sonnet-20240620'
+        ];
+
+        const openaiVoices = [
+            { name: "Alloy", value: "alloy" },
+            { name: "Echo", value: "echo" },
+            { name: "Fable", value: "fable" },
+            { name: "Onyx", value: "onyx" },
+            { name: "Nova", value: "nova" },
+            { name: "Shimmer", value: "shimmer" }
+        ];
+
         function saveSettings() {
             localStorage.setItem('baseUrl', baseUrlInput.value);
             localStorage.setItem('apiKey', apiKeyInput.value);
+            localStorage.setItem('ttsService', ttsService.value);
+            localStorage.setItem('openaiVoice', openaiVoiceSelect.value);
+            localStorage.setItem('edgeVoice', edgeVoiceSelect.value);
+            localStorage.setItem('openaiTtsSpeed', openaiTtsSpeed.value);
+            localStorage.setItem('edgeTtsSpeed', edgeTtsSpeed.value);
         }
 
         function loadSettings() {
             const savedBaseUrl = localStorage.getItem('baseUrl');
             const savedApiKey = localStorage.getItem('apiKey');
+            const savedTtsService = localStorage.getItem('ttsService');
+            const savedOpenaiVoice = localStorage.getItem('openaiVoice');
+            const savedEdgeVoice = localStorage.getItem('edgeVoice');
+            const savedOpenaiTtsSpeed = localStorage.getItem('openaiTtsSpeed');
+            const savedEdgeTtsSpeed = localStorage.getItem('edgeTtsSpeed');
             
             if (savedBaseUrl) {
                 baseUrlInput.value = savedBaseUrl;
@@ -120,6 +174,22 @@
                 apiKeyInput.value = savedApiKey;
                 fetchModels();
             }
+
+            if (savedTtsService) {
+                ttsService.value = savedTtsService;
+                updateTtsOptions();
+            }
+
+            if (savedOpenaiVoice) openaiVoiceSelect.value = savedOpenaiVoice;
+            if (savedEdgeVoice) edgeVoiceSelect.value = savedEdgeVoice;
+            if (savedOpenaiTtsSpeed) {
+                openaiTtsSpeed.value = savedOpenaiTtsSpeed;
+                updateTTSSpeed('openai');
+            }
+            if (savedEdgeTtsSpeed) {
+                edgeTtsSpeed.value = savedEdgeTtsSpeed;
+                updateTTSSpeed('edge');
+            }
         }
 
         baseUrlInput.addEventListener('input', updateBaseUrl);
@@ -127,14 +197,17 @@
         userInput.addEventListener('keypress', (e) => e.key === 'Enter' && sendMessage());
         micButton.addEventListener('click', toggleRecording);
         clearButton.addEventListener('click', clearChat);
-        ttsSpeed.addEventListener('input', updateTTSSpeed);
+        openaiTtsSpeed.addEventListener('input', () => updateTTSSpeed('openai'));
+        edgeTtsSpeed.addEventListener('input', () => updateTTSSpeed('edge'));
         apiKeyInput.addEventListener('input', debounce(() => {
             fetchModels();
             saveSettings();
         }, 500));
+        ttsService.addEventListener('change', updateTtsOptions);
 
         function updateBaseUrl() {
-            API_BASE_URL = baseUrlInput.value.trim();
+            const newBaseUrl = baseUrlInput.value.trim();
+            API_BASE_URL = newBaseUrl || 'https://gptproxy.openai520.top';
             saveSettings();
         }
 
@@ -150,14 +223,54 @@
             };
         }
 
-        function updateTTSSpeed() {
-            ttsSpeedValue.textContent = `TTS速度: ${ttsSpeed.value}`;
+        function updateTTSSpeed(service) {
+            if (service === 'openai') {
+                openaiTtsSpeedValue.textContent = `TTS速度: ${openaiTtsSpeed.value}`;
+            } else {
+                edgeTtsSpeedValue.textContent = `TTS速度: ${edgeTtsSpeed.value}`;
+            }
+            saveSettings();
+        }
+
+        function updateTtsOptions() {
+            if (ttsService.value === 'openai') {
+                openaiTtsOptions.style.display = 'flex';
+                edgeTtsOptions.style.display = 'none';
+            } else {
+                openaiTtsOptions.style.display = 'none';
+                edgeTtsOptions.style.display = 'flex';
+            }
+            updateVoiceOptions();
+            saveSettings();
+        }
+
+        function updateVoiceOptions() {
+            if (ttsService.value === 'openai') {
+                openaiVoiceSelect.innerHTML = '';
+                openaiVoices.forEach(voice => {
+                    const option = document.createElement('option');
+                    option.value = voice.value;
+                    option.textContent = voice.name;
+                    openaiVoiceSelect.appendChild(option);
+                });
+            } else {
+                edgeVoiceSelect.innerHTML = '';
+                const voices = speechSynthesis.getVoices();
+                voices.forEach((voice, index) => {
+                    if (voice.lang.startsWith('zh') || voice.lang.startsWith('en')) {
+                        const option = document.createElement('option');
+                        option.value = index;
+                        option.textContent = `${voice.name} (${voice.lang})`;
+                        edgeVoiceSelect.appendChild(option);
+                    }
+                });
+            }
         }
 
         async function fetchModels() {
             const apiKey = apiKeyInput.value.trim();
-            if (!apiKey || !API_BASE_URL) {
-                modelSelect.innerHTML = '<option value="">请先输入 API Key 和 Base URL</option>';
+            if (!apiKey) {
+                modelSelect.innerHTML = '<option value="">请先输入 API Key</option>';
                 return;
             }
 
@@ -168,7 +281,7 @@
                     }
                 });
                 const models = response.data.data
-                    .filter(model => /^(gpt|claude|gemini)-/.test(model.id))
+                    .filter(model => allowedModels.includes(model.id))
                     .map(model => model.id);
                 populateModelSelect(models);
             } catch (error) {
@@ -200,8 +313,8 @@
             }
         }
 
-        async function startRecording() {
-            stopCurrentAudio();
+                async function startRecording() {
+            stopAllAudio();
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 mediaRecorder = new MediaRecorder(stream);
@@ -268,47 +381,55 @@
 
         async function sendMessage() {
             const message = userInput.value.trim();
-            if (message) {
-                addMessageToChat('user', message);
-                userInput.value = '';
+            if (!message) return;
 
-                conversationHistory.push({ role: 'user', content: message });
-                if (conversationHistory.length > 10) {
-                    conversationHistory = conversationHistory.slice(-10);
-                }
+            appendMessage('user', message);
+            userInput.value = '';
 
-                try {
-                    const response = await axios.post(`${API_BASE_URL}/v1/chat/completions`, {
-                        model: modelSelect.value,
-                        messages: conversationHistory
-                    }, {
-                        headers: {
-                            'Authorization': `Bearer ${apiKeyInput.value}`,
-                            'Content-Type': 'application/json'
-                        }
-                    });
+            const apiKey = apiKeyInput.value.trim();
+            if (!apiKey) {
+                appendMessage('assistant', '请先输入 API Key');
+                return;
+            }
 
-                    const reply = response.data.choices[0].message.content;
-                    const speakerButton = addMessageToChat('assistant', reply);
-                    conversationHistory.push({ role: 'assistant', content: reply });
-                    speakMessage(reply, speakerButton);
-                } catch (error) {
-                    console.error('Error sending message to GPT:', error);
-                    showNotification('发送消息失败', 'error');
-                }
+            const selectedModel = modelSelect.value;
+            if (!selectedModel) {
+                appendMessage('assistant', '请选择一个模型');
+                return;
+            }
+
+            conversationHistory.push({ role: 'user', content: message });
+
+            try {
+                const response = await axios.post(`${API_BASE_URL}/v1/chat/completions`, {
+                    model: selectedModel,
+                    messages: conversationHistory
+                }, {
+                    headers: {
+                        'Authorization': `Bearer ${apiKey}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const assistantMessage = response.data.choices[0].message.content;
+                const speakerButton = appendMessage('assistant', assistantMessage);
+                conversationHistory.push({ role: 'assistant', content: assistantMessage });
+
+                // 在文字消息完全返回后，开始播放语音
+                await generateSpeech(assistantMessage, speakerButton);
+            } catch (error) {
+                console.error('Error sending message:', error);
+                appendMessage('assistant', '发送消息时出错');
             }
         }
 
-        function addMessageToChat(role, content) {
+        function appendMessage(role, content) {
             const messageDiv = document.createElement('div');
-            messageDiv.className = `flex mb-4 ${role === 'user' ? 'justify-end' : 'justify-start'}`;
-            
-            const innerDiv = document.createElement('div');
-            innerDiv.className = 'max-w-[70%]';
+            messageDiv.className = `mb-4 ${role === 'user' ? 'text-right' : 'text-left'}`;
 
             const contentDiv = document.createElement('div');
-            contentDiv.className = `p-2 rounded-lg ${role === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-black'}`;
-            
+            contentDiv.className = `inline-block p-2 rounded-lg ${role === 'user' ? 'bg-blue-200' : 'bg-gray-200'}`;
+
             if (role === 'assistant') {
                 contentDiv.innerHTML = DOMPurify.sanitize(marked.parse(content));
                 contentDiv.classList.add('markdown-body');
@@ -316,90 +437,138 @@
                 contentDiv.textContent = content;
             }
 
-            innerDiv.appendChild(contentDiv);
+            messageDiv.appendChild(contentDiv);
 
             let speakerButton;
             if (role === 'assistant') {
                 speakerButton = document.createElement('button');
-                speakerButton.className = 'mt-2 p-1 bg-blue-500 text-white rounded-full hover:bg-blue-600 transition-colors duration-300';
                 speakerButton.innerHTML = '🔊';
+                speakerButton.className = 'ml-2 p-2 bg-gray-300 rounded-full hover:bg-gray-400 focus:outline-none';
                 speakerButton.onclick = () => toggleSpeech(content, speakerButton);
-                innerDiv.appendChild(speakerButton);
+                messageDiv.appendChild(speakerButton);
             }
 
-            messageDiv.appendChild(innerDiv);
             chatContainer.appendChild(messageDiv);
             chatContainer.scrollTop = chatContainer.scrollHeight;
 
             return speakerButton;
         }
 
-        function toggleSpeech(message, button) {
-            if (button === currentSpeakerButton) {
-                stopCurrentAudio();
+        function toggleSpeech(text, speakerButton) {
+            if (isPlayingAudio && currentSpeakerButton === speakerButton) {
+                stopAllAudio();
             } else {
-                speakMessage(message, button);
+                generateSpeech(text, speakerButton);
             }
         }
 
-        async function speakMessage(message, button) {
-            latestSpeakerButton = button;
-            const plainText = message.replace(/```[\s\S]*?```/g, '').replace(/`([^`]+)`/g, '$1');
+        async function generateSpeech(text, speakerButton) {
+            stopAllAudio();
             
-            stopCurrentAudio();
+            const apiKey = apiKeyInput.value.trim();
+            if (!apiKey && ttsService.value === 'openai') {
+                showNotification('请先输入 API Key', 'error');
+                return;
+            }
 
             try {
-                const response = await axios.post(`${API_BASE_URL}/v1/audio/speech`, {
-                    model: 'tts-1',
-                    input: plainText,
-                    voice: 'alloy',
-                    speed: parseFloat(ttsSpeed.value)
-                }, {
-                    headers: {
-                        'Authorization': `Bearer ${apiKeyInput.value}`,
-                        'Content-Type': 'application/json'
-                    },
-                    responseType: 'arraybuffer'
-                });
+                if (ttsService.value === 'openai') {
+                    const response = await axios.post(`${API_BASE_URL}/v1/audio/speech`, {
+                        model: 'tts-1',
+                        input: text,
+                        voice: openaiVoiceSelect.value,
+                        speed: parseFloat(openaiTtsSpeed.value)
+                    }, {
+                        headers: {
+                            'Authorization': `Bearer ${apiKey}`,
+                            'Content-Type': 'application/json'
+                        },
+                        responseType: 'arraybuffer'
+                    });
+                    const audioBlob = new Blob([response.data], { type: 'audio/mpeg' });
+                    playAudio(audioBlob, speakerButton);
+                } else {
+                    // Edge TTS (Web Speech API)
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    const voices = speechSynthesis.getVoices();
+                    utterance.voice = voices[parseInt(edgeVoiceSelect.value)];
+                    utterance.rate = parseFloat(edgeTtsSpeed.value);
+                    
+                    utterance.onstart = () => {
+                        isPlayingAudio = true;
+                        updateSpeakerButtonState(speakerButton, true);
+                    };
+                    utterance.onend = () => {
+                        isPlayingAudio = false;
+                        updateSpeakerButtonState(speakerButton, false);
+                    };
+                    utterance.onerror = () => {
+                        isPlayingAudio = false;
+                        updateSpeakerButtonState(speakerButton, false);
+                    };
 
-                if (button !== latestSpeakerButton) {
-                    return; // 如果在等待过程中有新的请求，则放弃当前请求
+                    speechSynthesis.speak(utterance);
+                    currentAudio = utterance;
+                    currentSpeakerButton = speakerButton;
                 }
-
-                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                const audioBuffer = await audioContext.decodeAudioData(response.data);
-                const source = audioContext.createBufferSource();
-                source.buffer = audioBuffer;
-                source.connect(audioContext.destination);
-                source.start(0);
-
-                currentAudio = audioContext;
-                currentAudioSource = source;
-                currentSpeakerButton = button;
-
-                button.classList.add('speaker-active');
-
-                source.onended = () => {
-                    if (currentSpeakerButton === button) {
-                        stopCurrentAudio();
-                    }
-                };
             } catch (error) {
                 console.error('Error generating speech:', error);
-                showNotification('语音生成失败', 'error');
+                showNotification('生成语音失败', 'error');
             }
         }
 
-        function stopCurrentAudio() {
-            if (currentAudioSource) {
-                currentAudioSource.stop();
+        function playAudio(audioBlob, speakerButton) {
+            const audioUrl = URL.createObjectURL(audioBlob);
+            const audio = new Audio(audioUrl);
+
+            audio.onplay = () => {
+                isPlayingAudio = true;
+                updateSpeakerButtonState(speakerButton, true);
+            };
+
+            audio.onended = () => {
+                isPlayingAudio = false;
+                updateSpeakerButtonState(speakerButton, false);
+                URL.revokeObjectURL(audioUrl);
+            };
+
+            audio.onerror = () => {
+                isPlayingAudio = false;
+                updateSpeakerButtonState(speakerButton, false);
+                URL.revokeObjectURL(audioUrl);
+            };
+
+            currentAudio = audio;
+            currentAudioSource = audioUrl;
+            currentSpeakerButton = speakerButton;
+
+            audio.play();
+        }
+
+        function updateSpeakerButtonState(button, isPlaying) {
+            if (isPlaying) {
+                button.classList.add('speaker-active');
+            } else {
+                button.classList.remove('speaker-active');
             }
+        }
+
+        function stopAllAudio() {
             if (currentAudio) {
-                currentAudio.close();
+                if (ttsService.value === 'openai') {
+                    currentAudio.pause();
+                    currentAudio.currentTime = 0;
+                } else {
+                    speechSynthesis.cancel();
+                }
+            }
+            if (currentAudioSource) {
+                URL.revokeObjectURL(currentAudioSource);
             }
             if (currentSpeakerButton) {
-                currentSpeakerButton.classList.remove('speaker-active');
+                updateSpeakerButtonState(currentSpeakerButton, false);
             }
+            isPlayingAudio = false;
             currentAudio = null;
             currentAudioSource = null;
             currentSpeakerButton = null;
@@ -408,11 +577,19 @@
         function clearChat() {
             chatContainer.innerHTML = '';
             conversationHistory = [];
-            stopCurrentAudio();
+            stopAllAudio();
         }
 
-        updateTTSSpeed();
-        loadSettings(); // 加载保存的设置
+        // 初始化
+        loadSettings();
+        fetchModels();
+        updateTtsOptions();
+
+        // 确保在语音列表加载完成后更新选项
+        if (speechSynthesis.onvoiceschanged !== undefined) {
+            speechSynthesis.onvoiceschanged = updateVoiceOptions;
+        }
     </script>
 </body>
 </html>
+
